@@ -6,6 +6,15 @@
 	<dict/>
 	<key>files2</key>
 	<dict>
+		<key>MacOS/launcher</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			POI7UhwTI0Pm5Ng5MKdA6Xcvzzk=
+			</data>
+			<key>requirement</key>
+			<string>cdhash H"3ce23b521c132343e6e4d83930a740e9772fcf39"</string>
+		</dict>
 		<key>MacOS/mac_client</key>
 		<dict>
 			<key>cdhash</key>
