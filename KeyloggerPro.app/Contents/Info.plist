@@ -16,6 +16,7 @@
   <key>CFBundleShortVersionString</key>
   <string>1.0</string>
   <key>LSBackgroundOnly</key>
+  <key>LSUIElement</key>
   <true/>
 </dict>
 </plist>
