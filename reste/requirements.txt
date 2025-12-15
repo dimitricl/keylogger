@@ -1,5 +1,0 @@
-# Dépendances pour le keylogger éducatif
-pynput>=1.7.6
-flask>=2.3.0
-qrcode[pil]>=7.4.2
-requests>=2.31.0
