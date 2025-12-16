@@ -2,15 +2,42 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key>
-    <string>UpdateSystem</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.apple.updatesystem.service</string>
+
+    <!-- Identité -->
     <key>CFBundleName</key>
     <string>UpdateSystem</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>UpdateSystem</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>fr.claverie.updatesystem</string>
+
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+
+    <key>CFBundleExecutable</key>
+    <string>UpdateSystem</string>
+
+    <!-- Permissions TCC -->
+    <key>NSCameraUsageDescription</key>
+    <string>Accès à la caméra requis pour la capture d’images.</string>
+
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Accès au microphone requis.</string>
+
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Accès à l’écran requis pour la capture.</string>
+
+    <!-- IMPORTANT : app réelle, pas agent pur -->
     <key>LSUIElement</key>
-    <true/>
+    <false/>
+
 </dict>
 </plist>

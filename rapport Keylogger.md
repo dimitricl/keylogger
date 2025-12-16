@@ -1,0 +1,11 @@
+## Conclusion
+
+Ce projet avait pour objectif d’étudier et de mettre en œuvre, dans un cadre strictement pédagogique et contrôlé, différents mécanismes d’interaction avec le système d’exploitation macOS. Il a permis de concevoir une application native capable de collecter des événements clavier, de réaliser des captures d’écran et de communiquer de manière sécurisée avec un serveur distant.
+
+Les fonctionnalités de collecte des frappes clavier et de capture d’écran ont été implémentées avec succès. Leur fonctionnement repose sur l’utilisation d’API bas niveau du système, nécessitant la gestion explicite des permissions de sécurité, la signature du code et la configuration d’entitlements adaptés. Ces contraintes ont mis en évidence le rôle central des mécanismes de protection de macOS dans l’accès aux ressources sensibles et la nécessité de respecter un processus de déploiement rigoureux.
+
+La fonctionnalité de capture d’image via la webcam a, quant à elle, révélé une limitation imposée par le système d’exploitation. Bien que l’accès au périphérique soit correctement autorisé et que la session de capture soit initialisée sans erreur, les images produites sont volontairement neutralisées par macOS lorsque l’application s’exécute sans interface utilisateur ou interaction directe avec l’utilisateur. Ce comportement, conforme aux politiques de sécurité d’Apple, illustre la volonté du système de prévenir les usages abusifs des dispositifs de capture tout en conservant la compatibilité des frameworks concernés.
+
+Ce résultat constitue un enseignement essentiel du projet. Il démontre que la réussite d’une fonctionnalité ne dépend pas uniquement de la validité du code, mais également des restrictions structurelles imposées par le système d’exploitation. La compréhension de ces mécanismes est indispensable dans les domaines du développement applicatif, de la sécurité et de l’administration système.
+
+En conclusion, ce projet a permis d’acquérir une maîtrise approfondie des API macOS, des processus de signature et de sécurité, ainsi que des échanges client–serveur. Il a également favorisé une approche analytique des limites techniques et réglementaires des systèmes modernes, compétences essentielles dans les métiers de l’informatique et des réseaux.
